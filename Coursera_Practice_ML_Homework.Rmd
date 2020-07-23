@@ -1,0 +1,189 @@
+---
+title: "Coursera Practice ML Homework"
+author: "Alexey Butyrev"
+date: "7/20/2020"
+output: html_document
+---
+
+# Load Data and Libraries
+```{r message=FALSE, warning=FALSE}
+library(dplyr)
+library(ggplot2)
+library(caret)
+library(scales)
+library(knitr)
+library(kableExtra)
+
+library(Hmisc)
+nice.data.frame.print <- function(x)
+{
+  x %>% 
+    kable() %>%
+    kable_styling(bootstrap_options = "striped", 
+                  full_width = F, 
+                  position = "left")
+}
+
+train.df <- read.csv("pml-training.csv")
+
+# our test data set is actually our final apply data set so we would load it at the end to make final predictions for the 20 cases
+# apply.df  <- read.csv("pml-testing.csv") 
+
+```
+
+
+# Exploratory Anlysis
+
+The data has **`r nrow(train.df) %>% comma()`** rows and **`r ncol(train.df) %>% comma()`** columns.
+
+```{r}
+
+train.df %>% head() %>% nice.data.frame.print()
+```
+
+
+## Summary
+Skiping this step since it's too much to print and not too productive to look at
+```{r}
+
+#summary(train.df)
+#summary(test.df)
+
+#describe(train.df)
+```
+
+
+## Column names
+
+```{r}
+names(train.df)
+```
+
+## Column Types
+
+```{r}
+sapply(train.df, class) %>% table()
+```
+
+## Missing Values
+
+We have `r (sum(is.na(train.df)) / nrow(train.df) / ncol(train.df))  %>% percent()`
+### Missing values by columns
+```{r}
+
+na.counts <- colSums(is.na(train.df))
+sort(na.counts, decreasing = T)
+
+train.df[,names(na.counts[na.counts > 0])] %>% head(n = 50) %>% nice.data.frame.print()
+```
+
+The column with missing values correlate with each other (in terms of missing values).
+
+We can start with skipping all the columns that have missing values.
+
+
+```{r}
+exclude.cols <- which(na.counts > 0)
+
+train.df <- train.df[,-exclude.cols]
+```
+
+After excluding columns with missing values we got `r ncol(train.df)` left.
+
+
+## Correlation of Numerical inputs
+```{r}
+corr.mat <- cor(train.df[,sapply(train.df, is.numeric)])
+diag(corr.mat) <- 0
+col.remove <- findCorrelation(corr.mat, 0.8, names = T)
+print(col.remove)
+train.df <- train.df[,!(names(train.df) %in% col.remove)]
+
+```
+
+## Analysis of output
+
+Train output:
+```{r}
+table(train.df$classe)
+sapply(table(train.df$classe) / sum(table(train.df$classe)),percent)
+
+```
+
+## Factor inputs analysis
+
+```{r}
+train.df[,sapply(train.df, class) == "factor"] %>% names()
+
+train.df[,sapply(train.df, class) == "factor"] %>% summary()
+```
+For simplicity sake we may skip the factor variables and map new_window into 0 -1 and skip all the other factor variables
+
+```{r}
+train.df$new_window <- as.numeric(train.df$new_window) - 1
+names.to.keep <- names(which(sapply(train.df, class) != "factor"))
+
+train.df <- train.df[,c(names.to.keep,"classe")]
+# remove id_column
+train.df <- train.df %>% select(-X)
+
+```
+
+
+## Modelling
+## Split into Test Train and Validation
+For the sake of simplicity let's use only test and train data sets
+```{r}
+set.seed(123)
+train.ind <- createDataPartition(train.df$classe, p = 0.8, list = F)
+test.df  <- train.df[-train.ind,]
+train.df <- train.df[train.ind,]
+
+
+```
+
+
+Distribution of train ouputs:
+```{r}
+table(train.df$classe)
+sapply(table(train.df$classe) / sum(table(train.df$classe)),percent)
+```
+
+
+Distribution of test outputs:
+```{r}
+table(test.df$classe)
+sapply(table(test.df$classe) / sum(table(test.df$classe)),percent)
+```
+
+
+## Random Forest
+
+```{r}
+library(randomForest)
+rf.model <- randomForest(classe~.,data = train.df)
+print(rf.model)
+summary(rf.model)
+data.frame(attribute = row.names(rf.model$importance), importance = rf.model$importance) %>% arrange(-MeanDecreaseGini)
+```
+
+```{r}
+test.pred <- predict(rf.model, test.df)
+
+confusionMatrix(table(test.pred, test.df$classe))
+```
+
+```{r}
+apply.df  <- read.csv("pml-testing.csv")
+cols <- names(train.df)
+cols <- cols[cols != "classe"]
+apply.df <- apply.df[,cols]
+apply.df$new_window <- as.numeric(apply.df$new_window) - 1
+
+predict(rf.model, apply.df)
+```
+
+
+## Conclusiions
+Those results are enough to pass 100% accuracy on apply data. That's why I didn't train any other models.
+
